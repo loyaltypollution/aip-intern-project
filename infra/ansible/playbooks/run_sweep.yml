@@ -163,7 +163,7 @@
     - name: Sync AIPerf artifacts to local machine
       ansible.posix.synchronize:
         src: "~/artifacts/aip-intern/"
-        dest: "{{ playbook_dir }}/../artifacts/aip-intern/"
+        dest: "{{ playbook_dir }}/../../../artifacts/aip-intern/"
         mode: pull
         rsync_opts:
           - "--rsh=/tmp/aip_intern_rsync_ssh.sh"
@@ -173,7 +173,7 @@
     - name: Sync NeMo eval results to local machine
       ansible.posix.synchronize:
         src: "~/results/"
-        dest: "{{ playbook_dir }}/../artifacts/nemo/"
+        dest: "{{ playbook_dir }}/../../../artifacts/nemo/"
         mode: pull
         rsync_opts:
           - "--rsh=/tmp/aip_intern_rsync_ssh.sh"
