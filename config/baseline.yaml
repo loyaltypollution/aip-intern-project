@@ -1,0 +1,21 @@
+# Baseline single-agent sweep config
+# 1:1 with scripts/run_baseline.py
+# Edit llm.base_url and llm.model to match your endpoint.
+
+run:
+  n_runs: 20
+  run_id_prefix: "baseline"
+
+llm:
+  model: "Qwen/Qwen3-32B-Instruct"
+  base_url: "${OPENAI_BASE_URL}"
+  api_key: "${OPENAI_API_KEY}"
+  temperature: 0.0
+  max_tokens: 4096
+  request_timeout: 120
+
+mcp:
+  workspace_root: "workspace/"
+
+artifacts:
+  output_dir: "artifacts/"
