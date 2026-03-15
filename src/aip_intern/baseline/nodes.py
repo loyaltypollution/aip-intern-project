@@ -49,8 +49,8 @@ async def _invoke_with_tools(llm, messages, tools):
 
     Loops until the model returns a response with no tool_calls, or 10 iterations.
     Each tool result is appended as a ToolMessage so the model can use it.
-    Raises MalformedOutputError if a tool call fails.
-    Raises `MalformedOutputError` if 10 iterations are exhausted without a final text response.
+    Raises MalformedOutputError if a tool call fails or if 10 iterations are
+    exhausted without a final text response.
     """
     from langchain_core.messages import ToolMessage
 
