@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from aip_intern.baseline.graph import build_graph
 from aip_intern.baseline.nodes import brief_node, response_node, triage_node
 from aip_intern.baseline.state import BaselineState
 
@@ -59,3 +60,8 @@ async def test_response_node_requires_brief_result(mock_llm):
     state = _make_state(brief_result=None, triage_result="outputs/triage.csv")
     result = await response_node(state, llm=mock_llm, tools=[])
     assert result.get("error") is not None
+
+
+def test_build_graph_compiles(mock_llm):
+    graph = build_graph(mock_llm, tools=[])
+    assert graph is not None
