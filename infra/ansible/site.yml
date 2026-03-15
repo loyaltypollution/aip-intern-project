@@ -1,0 +1,11 @@
+---
+# Master playbook — runs GPU and CPU setup in parallel.
+# Usage:
+#   cd infra/ansible
+#   ansible-playbook site.yml
+#
+# Dry-run:
+#   ansible-playbook site.yml --check
+
+- import_playbook: setup_gpu.yml
+- import_playbook: setup_cpu.yml

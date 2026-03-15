@@ -1,0 +1,56 @@
+---
+- name: Set up GPU instance (vLLM)
+  hosts: gpu
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Stop unattended-upgrades to release apt lock
+      ansible.builtin.systemd_service:
+        name: unattended-upgrades
+        state: stopped
+      ignore_errors: true
+
+    - name: Wait for apt lock to be released
+      ansible.builtin.shell: |
+        while fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/cache/apt/archives/lock >/dev/null 2>&1; do
+          sleep 5
+        done
+      changed_when: false
+      args:
+        executable: /bin/bash
+
+    - name: Install system packages
+      apt:
+        name:
+          - python3-venv
+          - git
+          - nvidia-cuda-toolkit
+        state: present
+        update_cache: true
+
+    - name: Create venv-vllm
+      become: false
+      command: python3 -m venv ~/venv-vllm
+      args:
+        creates: ~/venv-vllm/bin/activate
+
+    - name: Install vLLM and dependencies
+      become: false
+      pip:
+        name:
+          - "vllm==0.12.0"
+          - "transformers>=4.45"
+          - "accelerate"
+        virtualenv: ~/venv-vllm
+        state: present
+
+    - name: Verify vLLM install
+      become: false
+      command: ~/venv-vllm/bin/python3 -c "import vllm; print(vllm.__version__)"
+      register: vllm_version
+      changed_when: false
+
+    - name: Show vLLM version
+      debug:
+        msg: "vLLM {{ vllm_version.stdout }}"

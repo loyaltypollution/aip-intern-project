@@ -1,0 +1,20 @@
+[Unit]
+Description=vLLM API server - {{ scenario }}
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu
+Environment="PATH=/home/ubuntu/venv-vllm/bin:/usr/bin:/bin"
+{% for key, value in (scenarios[scenario].vllm_env | default({})).items() %}
+Environment="{{ key }}={{ value }}"
+{% endfor %}
+ExecStart=/home/ubuntu/venv-vllm/bin/python -m vllm.entrypoints.openai.api_server --host 0.0.0.0 --port 8000 --model {{ scenarios[scenario].model }} {{ scenarios[scenario].vllm_args | join(' ') }}
+Restart=no
+TimeoutStopSec=120
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

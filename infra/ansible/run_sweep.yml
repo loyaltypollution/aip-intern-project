@@ -1,0 +1,180 @@
+---
+# Usage: ansible-playbook run_sweep.yml -e "scenario=S1 sweep_type=baseline"
+#        ansible-playbook run_sweep.yml -e "scenario=S1 sweep_type=mesh"
+# Optional: -e "skip_aiperf=true" -e "skip_nemo_eval=true"
+# sweep_type: "baseline" runs scripts/run_baseline.py
+#             "mesh"     runs scripts/run_mesh.py
+
+- name: Start vLLM for {{ scenario }}
+  hosts: gpu
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Validate scenario
+      assert:
+        that: scenario in scenarios
+        fail_msg: "Invalid scenario '{{ scenario }}'. Must be one of: {{ scenarios.keys() | list | join(', ') }}"
+
+    - name: Deploy vLLM systemd unit for {{ scenario }}
+      ansible.builtin.template:
+        src: templates/vllm.service.j2
+        dest: /etc/systemd/system/vllm.service
+        mode: '0644'
+
+    - name: Reload systemd daemon
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+
+    - name: Restart vLLM service
+      ansible.builtin.systemd_service:
+        name: vllm
+        state: restarted
+        enabled: false
+
+    - name: Wait for vLLM to be ready on port 8000
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 8000
+        state: started
+        timeout: 3600
+        delay: 10
+
+- name: Benchmark {{ scenario }}
+  hosts: cpu
+  tasks:
+    - name: Wait for vLLM health
+      uri:
+        url: "http://{{ gpu_private_ip }}:8000/v1/models"
+        status_code: 200
+      register: health
+      until: health.status == 200
+      retries: "{{ vllm_health_retries }}"
+      delay: "{{ vllm_health_delay }}"
+
+    - name: Verify model ID
+      uri:
+        url: "http://{{ gpu_private_ip }}:8000/v1/models"
+        return_content: true
+      register: models_response
+
+    - name: Wait for model to be ready (inference probe)
+      uri:
+        url: "http://{{ gpu_private_ip }}:8000/v1/chat/completions"
+        method: POST
+        headers:
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          model: "{{ scenarios[scenario].model }}"
+          messages:
+            - role: user
+              content: "hi"
+          max_tokens: 1
+        status_code: 200
+      register: inference_probe
+      until: inference_probe.status == 200
+      retries: 120   # 120 × 30s = 60 min ceiling
+      delay: 30
+
+    - name: "Run AIPerf (concurrency {{ item }})"
+      shell: |
+        source ~/aiperf/.venv/bin/activate
+        aiperf profile \
+          --model '{{ scenarios[scenario].model }}' \
+          --url http://{{ gpu_private_ip }}:8000 \
+          --prompt-input-tokens-mean 512 \
+          --prompt-input-tokens-stddev 0 \
+          --prompt-output-tokens-mean 512 \
+          --prompt-output-tokens-stddev 0 \
+          --endpoint-type chat \
+          --streaming \
+          --concurrency {{ item }} \
+          --request-count 200 \
+          --artifact-dir ~/artifacts/aip-intern/{{ scenario }}/con{{ item }}
+      args:
+        executable: /bin/bash
+      loop: "{{ aiperf_concurrency_levels }}"
+      async: "{{ aiperf_timeout }}"
+      poll: 15
+      ignore_errors: true
+      when: not (skip_aiperf | bool)
+
+    - name: Run sweep script ({{ sweep_type }})
+      shell: |
+        source ~/venv-aip-intern/bin/activate
+        python scripts/run_{{ sweep_type }}.py \
+          --scenario '{{ scenario }}' \
+          --model '{{ scenarios[scenario].model }}' \
+          --gpu-url http://{{ gpu_private_ip }}:8000
+      args:
+        executable: /bin/bash
+      when: sweep_type is defined
+
+    - name: Run NeMo Eval (MMLU)
+      shell: |
+        source ~/venv-nemo-eval/bin/activate
+        nemo-evaluator-launcher run \
+          --config ~/.nemo-eval-configs/local_basic.yaml \
+          -o "target.api_endpoint.url=http://{{ gpu_private_ip }}:8000/v1/completions" \
+          -o "++target.api_endpoint.model_id={{ scenarios[scenario].model }}" \
+          -o "~evaluation.tasks=null" \
+          -o "++evaluation.tasks=[{name: lm-evaluation-harness.mmlu}]" \
+          -o "execution.output_dir=/home/ubuntu/results/{{ scenario }}"
+      environment:
+        NGC_API_KEY: "dummy"
+      args:
+        executable: /bin/bash
+      when: not (skip_nemo_eval | bool)
+      async: "{{ nemo_eval_timeout }}"
+      poll: 30
+      ignore_errors: true
+
+- name: Stop vLLM for {{ scenario }}
+  hosts: gpu
+  become: true
+  tasks:
+    - name: Stop vLLM service
+      ansible.builtin.systemd_service:
+        name: vllm
+        state: stopped
+      ignore_errors: true
+
+    - name: Wait for port 8000 to close (GPU memory freed)
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 8000
+        state: stopped
+        timeout: 180
+        delay: 10
+
+- name: Collect artifacts for {{ scenario }}
+  hosts: cpu
+  tasks:
+    - name: Write rsync SSH wrapper script
+      ansible.builtin.copy:
+        content: |
+          #!/bin/sh
+          exec ssh -i "{{ playbook_dir }}/../ssh/aip-intern-generated-key.pem" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$@"
+        dest: /tmp/aip_intern_rsync_ssh.sh
+        mode: '0755'
+      delegate_to: localhost
+      run_once: true
+
+    - name: Sync AIPerf artifacts to local machine
+      ansible.posix.synchronize:
+        src: "~/artifacts/aip-intern/"
+        dest: "{{ playbook_dir }}/../artifacts/aip-intern/"
+        mode: pull
+        rsync_opts:
+          - "--rsh=/tmp/aip_intern_rsync_ssh.sh"
+      delegate_to: localhost
+      when: not (skip_aiperf | bool)
+
+    - name: Sync NeMo eval results to local machine
+      ansible.posix.synchronize:
+        src: "~/results/"
+        dest: "{{ playbook_dir }}/../artifacts/nemo/"
+        mode: pull
+        rsync_opts:
+          - "--rsh=/tmp/aip_intern_rsync_ssh.sh"
+      delegate_to: localhost

@@ -1,0 +1,161 @@
+---
+- name: Set up CPU instance (AIPerf + NeMo Eval)
+  hosts: cpu
+  become: true
+  gather_facts: true
+
+  vars:
+    aiperf_repo_url: "https://github.com/ai-dynamo/aiperf"
+
+  tasks:
+    - name: Stop unattended-upgrades to release apt lock
+      ansible.builtin.systemd_service:
+        name: unattended-upgrades
+        state: stopped
+      ignore_errors: true
+
+    - name: Wait for apt lock to be released
+      ansible.builtin.shell: |
+        while fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/cache/apt/archives/lock >/dev/null 2>&1; do
+          sleep 5
+        done
+      changed_when: false
+      args:
+        executable: /bin/bash
+
+    - name: Install system packages
+      apt:
+        name:
+          - python3-venv
+          - git
+        state: present
+        update_cache: true
+
+    # --- Docker (required by nemo-evaluator-launcher) ---
+    - name: Install Docker prerequisite packages
+      apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+
+    - name: Add Docker GPG key
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: "0644"
+
+    - name: Add Docker apt repository
+      ansible.builtin.apt_repository:
+        repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        filename: docker
+        state: present
+
+    - name: Install Docker Engine
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+        update_cache: true
+
+    - name: Enable and start Docker service
+      systemd:
+        name: docker
+        enabled: true
+        state: started
+
+    - name: Add ubuntu user to docker group
+      user:
+        name: ubuntu
+        groups: docker
+        append: true
+
+    - name: Pre-pull NeMo evaluator Docker image
+      shell: docker pull nvcr.io/nvidia/eval-factory/lm-evaluation-harness:26.01
+      args:
+        executable: /bin/bash
+
+    # --- AIPerf ---
+    - name: Clone AIPerf repo
+      become: false
+      git:
+        repo: "{{ aiperf_repo_url }}"
+        dest: ~/aiperf
+        update: true
+
+    - name: Create AIPerf venv
+      become: false
+      command: python3 -m venv ~/aiperf/.venv
+      args:
+        creates: ~/aiperf/.venv/bin/activate
+
+    - name: Install AIPerf (editable)
+      become: false
+      pip:
+        name: "."
+        chdir: ~/aiperf
+        virtualenv: ~/aiperf/.venv
+        editable: true
+        state: present
+
+    # --- NeMo Evaluator ---
+    - name: Create venv-nemo-eval
+      become: false
+      command: python3 -m venv ~/venv-nemo-eval
+      args:
+        creates: ~/venv-nemo-eval/bin/activate
+
+    - name: Install nemo-evaluator-launcher
+      become: false
+      pip:
+        name:
+          - pip
+          - nemo-evaluator-launcher
+        virtualenv: ~/venv-nemo-eval
+        state: latest
+
+    - name: Create nemo-eval config directory
+      become: false
+      file:
+        path: ~/.nemo-eval-configs
+        state: directory
+        mode: "0755"
+
+    - name: Find bundled local_basic.yaml
+      become: false
+      find:
+        paths: ~/venv-nemo-eval/lib
+        patterns: local_basic.yaml
+        recurse: true
+      register: bundled_config
+
+    - name: Copy bundled config (if found)
+      become: false
+      copy:
+        src: "{{ bundled_config.files[0].path }}"
+        dest: ~/.nemo-eval-configs/local_basic.yaml
+        remote_src: true
+      when: bundled_config.files | length > 0
+
+    - name: Fetch config from GitHub (fallback)
+      become: false
+      get_url:
+        url: "https://raw.githubusercontent.com/NVIDIA-NeMo/Evaluator/main/packages/nemo-evaluator-launcher/examples/local_basic.yaml"
+        dest: ~/.nemo-eval-configs/local_basic.yaml
+        force: false
+      when: bundled_config.files | length == 0
+
+    - name: Verify nemo-evaluator-launcher
+      become: false
+      command: ~/venv-nemo-eval/bin/nemo-evaluator-launcher --version
+      register: nemo_version
+      changed_when: false
+
+    - name: Show NeMo Evaluator version
+      debug:
+        msg: "nemo-evaluator-launcher {{ nemo_version.stdout }}"
