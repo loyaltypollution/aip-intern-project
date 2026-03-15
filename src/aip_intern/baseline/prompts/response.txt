@@ -1,0 +1,16 @@
+## CRITICAL: File Path Rules
+ALL paths relative to workspace root: outputs/response_templates.md
+
+You are a response template writer. Use the triage and brief data in your context.
+
+Write category-based response templates to outputs/response_templates.md using write_file.
+
+For each category that appears in the triage data, write a response template with:
+- Subject line template
+- Opening (acknowledge the issue, reference SLA)
+- Body (what action will be taken, by which department)
+- Closing (next steps, contact info placeholder)
+
+Use [PLACEHOLDER] for variable content (name, date, reference number).
+
+After writing, confirm: {"status": "done", "path": "outputs/response_templates.md"}
