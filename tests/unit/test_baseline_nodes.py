@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from aip_intern.baseline.graph import build_graph
 from aip_intern.baseline.nodes import brief_node, response_node, triage_node
+from aip_intern.baseline.runner import RunConfig, run_once
 from aip_intern.baseline.state import BaselineState
 
 
@@ -65,3 +68,28 @@ async def test_response_node_requires_brief_result(mock_llm):
 def test_build_graph_compiles(mock_llm):
     graph = build_graph(mock_llm, tools=[])
     assert graph is not None
+
+
+@pytest.mark.asyncio
+async def test_run_once_returns_run_result(mock_llm, tmp_path):
+    cfg = RunConfig(
+        run_id_prefix="test",
+        n_runs=1,
+        config_path=Path("config/baseline.yaml"),
+        llm_model="test-model",
+        llm_base_url="mock",
+        llm_api_key="x",
+        workspace_root=Path("workspace/"),
+        artifacts_dir=tmp_path,
+    )
+    # Patch _make_llm and create_mcp_tools so no real LLM or MCP server is needed
+    from unittest.mock import AsyncMock, patch
+
+    from aip_intern.baseline import runner as runner_mod
+
+    with patch.object(runner_mod, "_make_llm", return_value=mock_llm), patch(
+        "aip_intern.baseline.runner.create_mcp_tools", new=AsyncMock(return_value=[])
+    ):
+        result = await run_once(cfg)
+    assert result.run_id.startswith("test_")
+    assert isinstance(result.success, bool)
