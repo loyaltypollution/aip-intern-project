@@ -126,6 +126,11 @@ async def run_once(cfg: RunConfig) -> RunResult:
         success = False
         error_msg = str(e)
         metrics.error = error_msg
+    except Exception as e:
+        metrics.total_latency_s = time.perf_counter() - t0
+        success = False
+        error_msg = f"Unexpected error: {e}"
+        metrics.error = error_msg
 
     metrics_path = artifacts_run_dir / "metrics.json"
     metrics.write(metrics_path)

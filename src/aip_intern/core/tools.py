@@ -29,6 +29,10 @@ async def create_mcp_tools(workspace_root: Path) -> list:
                         All file paths inside agents MUST be relative to this root.
     Returns:
         List of langchain BaseTool objects.
+
+    Note: The MCP server process is not explicitly closed. For sweeps, this
+    creates one npx process per run. Acceptable for research workloads; add
+    explicit close() handling for production use.
     """
     _check_node()
     client = MultiServerMCPClient(
