@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import pytest
-from aip_intern.baseline.nodes import triage_node, brief_node, response_node
+
+from aip_intern.baseline.nodes import brief_node, response_node, triage_node
 from aip_intern.baseline.state import BaselineState
 
 
