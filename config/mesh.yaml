@@ -6,7 +6,7 @@ run:
   run_id_prefix: "mesh"
 
 llm:
-  model: "Qwen/Qwen3-32B-Instruct"
+  model: "gemini-2.5-flash"
   base_url: "${OPENAI_BASE_URL}"
   api_key: "${OPENAI_API_KEY}"
   temperature: 0.0
@@ -14,7 +14,7 @@ llm:
   request_timeout: 120
 
 mcp:
-  workspace_root: "workspace/"
+  workspace_root: "."
 
 artifacts:
   output_dir: "artifacts/"
