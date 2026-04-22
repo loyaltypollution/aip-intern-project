@@ -16,6 +16,7 @@ Usage from notebooks:
 from __future__ import annotations
 
 import dataclasses
+import shutil
 import time
 import uuid
 from dataclasses import dataclass
@@ -25,7 +26,7 @@ from typing import Optional
 from aip_intern.baseline.graph import build_graph
 from aip_intern.baseline.state import BaselineState
 from aip_intern.core.exceptions import AIPInternError
-from aip_intern.core.metrics import RunMetrics
+from aip_intern.core.metrics import NodeMetrics, RunMetrics
 from aip_intern.core.tools import create_mcp_tools
 from aip_intern.core.tracing import get_callback, get_langfuse
 
@@ -49,6 +50,7 @@ class RunConfig:
     llm_temperature: float = 0.0
     llm_max_tokens: int = 4096
     llm_request_timeout: int = 120
+    task_description: str = "Triage citizen feedback → action brief → response drafts"
 
 
 @dataclass
@@ -91,6 +93,12 @@ async def run_once(cfg: RunConfig) -> RunResult:
     artifacts_run_dir = cfg.artifacts_dir / run_id
     outputs_dir = artifacts_run_dir / "outputs"
     outputs_dir.mkdir(parents=True, exist_ok=True)
+    shared_outputs_dir = (cfg.workspace_root / "outputs").resolve()
+    shared_outputs_dir.mkdir(parents=True, exist_ok=True)
+    for stale_name in ("triage.csv", "brief.md", "response_templates.md"):
+        stale_path = shared_outputs_dir / stale_name
+        if stale_path.exists():
+            stale_path.unlink()
 
     metrics = RunMetrics(run_id=run_id)
     lf = get_langfuse()
@@ -104,7 +112,7 @@ async def run_once(cfg: RunConfig) -> RunResult:
 
     initial_state: BaselineState = {
         "run_id": run_id,
-        "task_description": "Triage citizen feedback → action brief → response drafts",
+        "task_description": cfg.task_description,
         "feedback_files": [],   # nodes use MCP list_directory instead
         "policy_content": "",   # nodes use MCP read_file instead
         "triage_result": None,
@@ -112,6 +120,7 @@ async def run_once(cfg: RunConfig) -> RunResult:
         "response_result": None,
         "error": None,
         "step_trace": [],
+        "node_metrics": [],
     }
 
     t0 = time.perf_counter()
@@ -119,6 +128,39 @@ async def run_once(cfg: RunConfig) -> RunResult:
         result_state = await graph.ainvoke(initial_state, config=invoke_config)
         metrics.total_latency_s = time.perf_counter() - t0
         metrics.step_trace = result_state.get("step_trace", [])
+        metrics.error = result_state.get("error")
+
+        node_metrics_raw = result_state.get("node_metrics", []) or []
+        metrics.nodes = [
+            NodeMetrics(
+                name=str(item.get("name", "unknown_node")),
+                latency_s=float(item.get("latency_s", 0.0)),
+                prompt_tokens=int(item.get("prompt_tokens", 0)),
+                completion_tokens=int(item.get("completion_tokens", 0)),
+                error=item.get("error"),
+            )
+            for item in node_metrics_raw
+            if isinstance(item, dict)
+        ]
+        metrics.total_prompt_tokens = sum(n.prompt_tokens for n in metrics.nodes)
+        metrics.total_completion_tokens = sum(n.completion_tokens for n in metrics.nodes)
+
+        fallback_text_by_name = {
+            "triage.csv": result_state.get("triage_result_text") or "",
+            "brief.md": result_state.get("brief_result_text") or "",
+            "response_templates.md": result_state.get("response_result_text") or "",
+        }
+
+        for out_name, fallback_text in fallback_text_by_name.items():
+            source_path = shared_outputs_dir / out_name
+            if not source_path.exists() and str(fallback_text).strip():
+                source_path.write_text(str(fallback_text).strip() + "\n")
+
+        for source_name in ("triage.csv", "brief.md", "response_templates.md"):
+            source_path = shared_outputs_dir / source_name
+            if source_path.exists():
+                shutil.copy2(source_path, outputs_dir / source_name)
+
         success = result_state.get("error") is None
         error_msg = result_state.get("error")
     except AIPInternError as e:

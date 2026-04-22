@@ -11,8 +11,8 @@ from crewai import Agent, Task
 def make_triage_task(agent: Agent) -> Task:
     return Task(
         description=(
-            "Read all feedback files from data/feedback/ and policy from "
-            "data/policy_snippets.md. Classify each item and write "
+            "Read all feedback files from workspace/data/feedback/ and policy from "
+            "workspace/data/policy_snippets.md. Classify each item and write "
             "outputs/triage.csv with columns: "
             "id,category,urgency,owner,summary,pii_flagged"
         ),
@@ -24,7 +24,7 @@ def make_triage_task(agent: Agent) -> Task:
 def make_brief_task(agent: Agent, triage_task: Task | None = None) -> Task:
     return Task(
         description=(
-            "Read outputs/triage.csv and data/policy_snippets.md. "
+            "Read outputs/triage.csv and workspace/data/policy_snippets.md. "
             "Write outputs/brief.md (executive summary, urgent items, "
             "theme analysis, recommended actions, statistics). "
             "Then write outputs/response_templates.md (one template per category)."

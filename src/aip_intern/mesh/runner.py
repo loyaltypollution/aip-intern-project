@@ -46,7 +46,7 @@ async def run_once(cfg: RunConfig) -> RunResult:
 
     initial_state: MeshState = {
         "run_id": run_id,
-        "task_description": "Triage citizen feedback → action brief → response drafts",
+        "task_description": cfg.task_description,
         "triage_result": None,
         "brief_result": None,
         "response_result": None,

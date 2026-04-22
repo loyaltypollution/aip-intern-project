@@ -21,6 +21,7 @@ def create_llm(cfg: LLMCfg) -> ChatOpenAI:
     Works with:
       - Local vLLM: base_url = "http://<gpu-ip>:8000/v1", api_key = "not-needed"
       - OpenAI API: base_url = "https://api.openai.com/v1", api_key = real key
+            - Gemini API: base_url = "https://generativelanguage.googleapis.com/v1beta/openai", api_key = Gemini key
 
     For unit tests, use the mock_llm fixture in tests/conftest.py instead.
     """

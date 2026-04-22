@@ -19,11 +19,49 @@ from typing import Optional
 import yaml
 
 
+DEFAULT_GEMINI_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+
+
+def _env_candidates(name: str) -> tuple[str, ...]:
+    if name == "OPENAI_BASE_URL":
+        return ("OPENAI_BASE_URL", "GEMINI_BASE_URL", "GOOGLE_BASE_URL")
+    if name == "OPENAI_API_KEY":
+        return ("OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY")
+    if name == "OPENAI_MODEL":
+        return ("OPENAI_MODEL", "GEMINI_MODEL")
+    return (name,)
+
+
+def _has_gemini_credentials() -> bool:
+    return any(
+        os.environ.get(name)
+        for name in (
+            "GEMINI_API_KEY",
+            "GOOGLE_API_KEY",
+            "GEMINI_BASE_URL",
+            "GOOGLE_BASE_URL",
+        )
+    )
+
+
 def _resolve_env(value: str) -> str:
-    """Replace ${VAR} with os.environ.get(VAR, original_placeholder)."""
+    """Replace ${VAR} with an environment value, honoring Gemini/OpenAI aliases."""
+
+    def _replace(match: re.Match[str]) -> str:
+        name = match.group(1)
+        for candidate in _env_candidates(name):
+            env_value = os.environ.get(candidate)
+            if env_value:
+                return env_value
+
+        if name == "OPENAI_BASE_URL" and _has_gemini_credentials():
+            return DEFAULT_GEMINI_OPENAI_BASE_URL
+
+        return match.group(0)
+
     return re.sub(
         r"\$\{(\w+)\}",
-        lambda m: os.environ.get(m.group(1), m.group(0)),
+        _replace,
         value,
     )
 
