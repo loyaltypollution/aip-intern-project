@@ -38,7 +38,7 @@ def main() -> None:
     if not config_path.exists():
         print(f"Config not found: {config_path}")
         print(
-            "Copy config/baseline.yaml and set OPENAI_BASE_URL + OPENAI_API_KEY in .env"
+            "Copy config/baseline.yaml and set GEMINI_API_KEY (or OPENAI_* if using vLLM/OpenAI) in .env"
         )
         sys.exit(1)
 

@@ -33,6 +33,9 @@ def main() -> None:
     config_path = Path(args.config)
     if not config_path.exists():
         print(f"Config not found: {config_path}")
+        print(
+            "Copy config/mesh.yaml and set GEMINI_API_KEY (or OPENAI_* if using vLLM/OpenAI) in .env"
+        )
         sys.exit(1)
 
     app_cfg = load_config(config_path)
