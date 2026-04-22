@@ -5,10 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "aip-intern"
 version = "0.1.0"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 dependencies = [
     "langgraph>=0.4",
     "langchain-openai>=0.3",
+    "langchain-core>=0.3",
     "langchain-mcp-adapters>=0.1",
     "mcp>=1.0",
     "crewai>=0.80",
@@ -21,6 +22,8 @@ dependencies = [
     "notebook>=7.0",
     "nest-asyncio>=1.6",
     "python-dotenv>=1.0",
+    "litellm>=0.1",
+    "crewai langchain-google-genai",
 ]
 
 [project.optional-dependencies]
