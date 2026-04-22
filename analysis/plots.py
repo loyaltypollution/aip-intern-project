@@ -61,3 +61,29 @@ def plot_token_cost(df: pd.DataFrame, label: str = "") -> plt.Figure:
     ax.legend()
     fig.tight_layout()
     return fig
+
+
+def plot_benchmark_summary(summary: pd.DataFrame) -> plt.Figure:
+    """Plot latency, token cost, and success rate side-by-side for each task/system."""
+    fig, axes = plt.subplots(1, 3, figsize=(16, 4))
+    if summary.empty:
+        return fig
+
+    order = summary.sort_values(["task", "system"])
+    labels = [f"{task}\n{system}" for task, system in zip(order["task"], order["system"])]
+
+    axes[0].bar(labels, order["latency_ms_mean"])
+    axes[0].set_title("Latency (ms)")
+    axes[0].tick_params(axis="x", rotation=20)
+
+    axes[1].bar(labels, order["tokens_mean"])
+    axes[1].set_title("Tokens used")
+    axes[1].tick_params(axis="x", rotation=20)
+
+    axes[2].bar(labels, order["success_rate"])
+    axes[2].set_ylim(0, 1)
+    axes[2].set_title("Success rate")
+    axes[2].tick_params(axis="x", rotation=20)
+
+    fig.tight_layout()
+    return fig
