@@ -21,6 +21,7 @@ def test_baseline_state_construction():
         "response_result": None,
         "error": None,
         "step_trace": [],
+        "node_metrics": [],
     }
     assert state["run_id"] == "baseline_test"
     assert state["step_trace"] == []
@@ -37,6 +38,7 @@ def _make_state(**overrides) -> BaselineState:
         "response_result": None,
         "error": None,
         "step_trace": [],
+        "node_metrics": [],
     }
     base.update(overrides)
     return base
