@@ -8,16 +8,21 @@
     aiperf_repo_url: "https://github.com/ai-dynamo/aiperf"
 
   tasks:
-    - name: Stop unattended-upgrades to release apt lock
-      ansible.builtin.systemd_service:
-        name: unattended-upgrades
-        state: stopped
-      ignore_errors: true
-
-    - name: Wait for apt lock to be released
+    # Fresh Ubuntu AMIs run unattended-upgrades on first boot, which holds the
+    # dpkg lock for several minutes. `systemctl stop` is async and doesn't kill
+    # the in-flight apt-get child, so we kill the process tree directly and
+    # then wait for every apt lock file to be free before proceeding.
+    - name: Kill unattended-upgrades and wait for apt locks
       ansible.builtin.shell: |
-        while fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/cache/apt/archives/lock >/dev/null 2>&1; do
-          sleep 5
+        set -eu
+        systemctl stop unattended-upgrades.service 2>/dev/null || true
+        systemctl mask unattended-upgrades.service 2>/dev/null || true
+        pkill -9 -f unattended-upgr 2>/dev/null || true
+        for lock in /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock; do
+          for _ in $(seq 1 120); do
+            fuser "$lock" >/dev/null 2>&1 || break
+            sleep 5
+          done
         done
       changed_when: false
       args:
@@ -28,8 +33,37 @@
         name:
           - python3-venv
           - git
+          - rsync
+          - software-properties-common
+          - curl
         state: present
         update_cache: true
+
+    - name: Add NodeSource repo (Node.js 22 LTS)
+      shell: curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+      args:
+        executable: /bin/bash
+        creates: /etc/apt/sources.list.d/nodesource.list
+
+    - name: Install Node.js
+      apt:
+        name: nodejs
+        state: present
+        update_cache: true
+
+    - name: Add deadsnakes PPA (provides python3.11 on Ubuntu 22.04)
+      ansible.builtin.apt_repository:
+        repo: "ppa:deadsnakes/ppa"
+        state: present
+        update_cache: true
+
+    - name: Install python3.11 + venv
+      apt:
+        name:
+          - python3.11
+          - python3.11-venv
+          - python3.11-dev
+        state: present
 
     # --- Docker (required by nemo-evaluator-launcher) ---
     - name: Install Docker prerequisite packages
@@ -161,6 +195,35 @@
         msg: "nemo-evaluator-launcher {{ nemo_version.stdout }}"
 
     # --- aip-intern-project ---
+    - name: Write rsync SSH wrapper (push)
+      ansible.builtin.copy:
+        content: |
+          #!/bin/sh
+          exec ssh -i "{{ playbook_dir }}/../../ssh/aip-intern-generated-key.pem" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$@"
+        dest: /tmp/aip_intern_push_ssh.sh
+        mode: '0755'
+      delegate_to: localhost
+      become: false
+      run_once: true
+
+    - name: Sync local repo to CPU box
+      ansible.posix.synchronize:
+        src: "{{ playbook_dir }}/../../../"
+        dest: "/home/ubuntu/aip-intern-project/"
+        delete: false
+        rsync_opts:
+          - "--exclude=.git"
+          - "--exclude=artifacts/"
+          - "--exclude=.venv"
+          - "--exclude=__pycache__"
+          - "--exclude=.mypy_cache"
+          - "--exclude=.pytest_cache"
+          - "--exclude=node_modules"
+          - "--exclude=.DS_Store"
+          - "--rsh=/tmp/aip_intern_push_ssh.sh"
+      delegate_to: localhost
+      become: false
+
     - name: Create venv-aip-intern
       become: false
       command: python3.11 -m venv ~/venv-aip-intern

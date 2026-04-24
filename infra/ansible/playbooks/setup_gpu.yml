@@ -5,16 +5,21 @@
   gather_facts: false
 
   tasks:
-    - name: Stop unattended-upgrades to release apt lock
-      ansible.builtin.systemd_service:
-        name: unattended-upgrades
-        state: stopped
-      ignore_errors: true
-
-    - name: Wait for apt lock to be released
+    # Fresh Ubuntu AMIs run unattended-upgrades on first boot, which holds the
+    # dpkg lock for several minutes. `systemctl stop` is async and doesn't kill
+    # the in-flight apt-get child, so we kill the process tree directly and
+    # then wait for every apt lock file to be free before proceeding.
+    - name: Kill unattended-upgrades and wait for apt locks
       ansible.builtin.shell: |
-        while fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/cache/apt/archives/lock >/dev/null 2>&1; do
-          sleep 5
+        set -eu
+        systemctl stop unattended-upgrades.service 2>/dev/null || true
+        systemctl kill -s KILL unattended-upgrades.service 2>/dev/null || true
+        systemctl mask unattended-upgrades.service 2>/dev/null || true
+        for lock in /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock; do
+          for _ in $(seq 1 120); do
+            fuser "$lock" >/dev/null 2>&1 || break
+            sleep 5
+          done
         done
       changed_when: false
       args:

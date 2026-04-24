@@ -31,50 +31,71 @@
         state: restarted
         enabled: false
 
-    - name: Wait for vLLM to be ready on port 8000
-      ansible.builtin.wait_for:
-        host: 127.0.0.1
-        port: 8000
-        state: started
-        timeout: 3600
-        delay: 10
+    - name: Wait for vLLM to be ready on port 8000 (async shell poll)
+      shell: |
+        # Model load for 32B on 4xL40S is ~60–180s. Cap poll at 15 min and
+        # fail fast if systemd reports the unit failed/inactive — otherwise
+        # a crashed vllm looks identical to a slow-loading vllm for 1h.
+        for i in $(seq 1 90); do
+          if curl -sf --max-time 5 http://127.0.0.1:8000/v1/models > /dev/null 2>&1; then
+            echo "vLLM ready after $((i * 10))s"
+            exit 0
+          fi
+          STATE=$(systemctl is-active vllm || true)
+          if [ "$STATE" = "failed" ] || [ "$STATE" = "inactive" ]; then
+            echo "FATAL: vllm.service state=$STATE after $((i * 10))s — not waiting further"
+            journalctl -u vllm --no-pager -n 80
+            exit 1
+          fi
+          echo "Attempt $i/90 — state=$STATE — waiting 10s..."
+          sleep 10
+        done
+        echo "TIMEOUT: vLLM not ready after 900s"
+        journalctl -u vllm --no-pager -n 80
+        exit 1
+      args:
+        executable: /bin/bash
+      async: 1000
+      poll: 20
 
 - name: Benchmark {{ scenario }}
   hosts: cpu
   tasks:
-    - name: Wait for vLLM health
-      uri:
-        url: "http://{{ gpu_private_ip }}:8000/v1/models"
-        status_code: 200
-      register: health
-      until: health.status == 200
-      retries: "{{ vllm_health_retries }}"
-      delay: "{{ vllm_health_delay }}"
+    - name: Wait for vLLM health + inference probe (async shell poll)
+      shell: |
+        set -euo pipefail
+        GPU="{{ gpu_private_ip }}"
+        MODEL="{{ scenarios[scenario].model }}"
 
-    - name: Verify model ID
-      uri:
-        url: "http://{{ gpu_private_ip }}:8000/v1/models"
-        return_content: true
-      register: models_response
+        echo "=== Waiting for /v1/models ==="
+        for i in $(seq 1 360); do
+          STATUS=$(curl -sf --max-time 5 "http://${GPU}:8000/v1/models" 2>&1) && {
+            echo "vLLM /v1/models OK: $STATUS"
+            break
+          }
+          echo "Attempt $i/360 — retrying in 10s..."
+          sleep 10
+        done
 
-    - name: Wait for model to be ready (inference probe)
-      uri:
-        url: "http://{{ gpu_private_ip }}:8000/v1/chat/completions"
-        method: POST
-        headers:
-          Content-Type: "application/json"
-        body_format: json
-        body:
-          model: "{{ scenarios[scenario].model }}"
-          messages:
-            - role: user
-              content: "hi"
-          max_tokens: 1
-        status_code: 200
-      register: inference_probe
-      until: inference_probe.status == 200
-      retries: 120   # 120 × 30s = 60 min ceiling
-      delay: 30
+        echo "=== Inference probe (hi / max_tokens=1) ==="
+        for i in $(seq 1 120); do
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 \
+            -X POST "http://${GPU}:8000/v1/chat/completions" \
+            -H "Content-Type: application/json" \
+            -d "{\"model\":\"${MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":1}")
+          if [ "$CODE" = "200" ]; then
+            echo "Inference probe OK (attempt $i)"
+            exit 0
+          fi
+          echo "Probe attempt $i/120 — HTTP $CODE — retrying in 30s..."
+          sleep 30
+        done
+        echo "ERROR: inference probe timed out"
+        exit 1
+      args:
+        executable: /bin/bash
+      async: 7200
+      poll: 30
 
     - name: "Run AIPerf (concurrency {{ item }})"
       shell: |
@@ -99,16 +120,44 @@
       ignore_errors: true
       when: not (skip_aiperf | bool)
 
+    # Pair semantics: one sweep_stamp covers a baseline+mesh pair. The skill
+    # passes `-e sweep_stamp=...` to both ansible invocations so they write
+    # into the same dir. If no -e override, fall back to CPU's current UTC
+    # (useful for ad-hoc single-scenario runs).
+    - name: Record sweep timestamps on CPU host (fallback when sweep_stamp not provided)
+      ansible.builtin.shell: |
+        echo "iso=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+        echo "stamp=$(date -u +%Y%m%d-%H%M)"
+      register: sweep_stamp_probe
+      changed_when: false
+
+    - name: Expose sweep timestamps as facts
+      ansible.builtin.set_fact:
+        sweep_start_ts: "{{ (sweep_stamp_probe.stdout_lines | select('match', '^iso=')   | first).split('=',1)[1] }}"
+        sweep_stamp: "{{ sweep_stamp | default((sweep_stamp_probe.stdout_lines | select('match', '^stamp=') | first).split('=',1)[1], true) }}"
+
     - name: Run sweep script ({{ sweep_type }})
       shell: |
+        set -o pipefail
         source ~/venv-aip-intern/bin/activate
-        python scripts/run_{{ sweep_type }}.py \
-          --scenario '{{ scenario }}' \
-          --model '{{ scenarios[scenario].model }}' \
-          --gpu-url http://{{ gpu_private_ip }}:8000
+        cd ~/aip-intern-project
+        export OPENAI_BASE_URL="http://{{ gpu_private_ip }}:8000/v1"
+        export OPENAI_API_KEY="not-needed-for-vllm"
+        export OPENAI_MODEL="{{ scenarios[scenario].model }}"
+        export AIP_SWEEP_STAMP="{{ sweep_stamp }}"
+        python scripts/run_{{ sweep_type }}.py --config config/{{ sweep_type }}.yaml 2>&1 | tee ~/sweep_{{ sweep_type }}.log
       args:
         executable: /bin/bash
       when: sweep_type is defined
+      async: 14400   # 4h ceiling for a 20-run sweep
+      poll: 30
+      register: sweep_result
+      ignore_errors: true
+
+    - name: Show sweep tail
+      debug:
+        var: sweep_result.stdout_lines[-30:]
+      when: sweep_type is defined and sweep_result.stdout_lines is defined
 
     - name: Run NeMo Eval (MMLU)
       shell: |
@@ -178,3 +227,36 @@
         rsync_opts:
           - "--rsh=/tmp/aip_intern_rsync_ssh.sh"
       delegate_to: localhost
+      when: not (skip_nemo_eval | bool)
+
+    - name: Ensure local sweep parent dir exists
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/../../../artifacts/sweeps/{{ hostvars[groups['cpu'][0]].sweep_stamp }}"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      when: hostvars[groups['cpu'][0]].sweep_stamp is defined
+
+    # Pull this scenario's runs from the pair dir.
+    # Layout: artifacts/sweeps/{sweep_stamp}/{scenario}/{run_id}/
+    - name: Sync this scenario's runs under the pair dir
+      ansible.posix.synchronize:
+        src: "/home/ubuntu/aip-intern-project/artifacts/sweeps/{{ hostvars[groups['cpu'][0]].sweep_stamp }}/{{ scenario }}/"
+        dest: "{{ playbook_dir }}/../../../artifacts/sweeps/{{ hostvars[groups['cpu'][0]].sweep_stamp }}/{{ scenario }}/"
+        mode: pull
+        rsync_opts:
+          - "--rsh=/tmp/aip_intern_rsync_ssh.sh"
+      delegate_to: localhost
+      when: hostvars[groups['cpu'][0]].sweep_stamp is defined
+
+    - name: Sync sweep log to local machine
+      ansible.posix.synchronize:
+        src: "/home/ubuntu/sweep_{{ sweep_type }}.log"
+        dest: "{{ playbook_dir }}/../../../artifacts/sweep_{{ sweep_type }}.log"
+        mode: pull
+        rsync_opts:
+          - "--rsh=/tmp/aip_intern_rsync_ssh.sh"
+      delegate_to: localhost
+      when: sweep_type is defined
+      ignore_errors: true
+

@@ -12,7 +12,8 @@ Environment="{{ key }}={{ value }}"
 {% endfor %}
 ExecStart=/home/ubuntu/venv-vllm/bin/python -m vllm.entrypoints.openai.api_server --host 0.0.0.0 --port 8000 --model {{ scenarios[scenario].model }} {{ scenarios[scenario].vllm_args | join(' ') }}
 Restart=no
-TimeoutStopSec=120
+TimeoutStopSec=600
+TimeoutStartSec=900
 StandardOutput=journal
 StandardError=journal
 
