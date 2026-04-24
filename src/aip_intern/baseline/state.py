@@ -31,3 +31,5 @@ class BaselineState(TypedDict):
 
     # Observability
     step_trace: list[str]          # ordered list of node names visited, e.g. ["triage_node", ...]
+    prompt_tokens: int             # accumulated LLM input tokens across all nodes
+    completion_tokens: int         # accumulated LLM output tokens across all nodes

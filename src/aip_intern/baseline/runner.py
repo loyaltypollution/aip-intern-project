@@ -16,6 +16,7 @@ Usage from notebooks:
 from __future__ import annotations
 
 import dataclasses
+import shutil
 import time
 import uuid
 from dataclasses import dataclass
@@ -26,26 +27,31 @@ from aip_intern.baseline.graph import build_graph
 from aip_intern.baseline.state import BaselineState
 from aip_intern.core.exceptions import AIPInternError
 from aip_intern.core.metrics import RunMetrics
-from aip_intern.core.tools import create_mcp_tools
+from aip_intern.baseline.tools import get_tools, set_workspace_root
 from aip_intern.core.tracing import get_callback, get_langfuse
 
 
 @dataclass
 class RunConfig:
-    """Configuration for a baseline sweep.
+    """Configuration for a sweep (baseline or mesh).
 
     Passed directly to run() or run_once(). One RunConfig per sweep;
     run_once() derives a fresh run_id per iteration.
+
+    Artifact layout:
+        {artifacts_dir}/sweeps/{sweep_stamp}/{scenario}/{run_id}/metrics.json
+    where sweep_stamp identifies an overnight (baseline + mesh) pair.
     """
 
-    run_id_prefix: str
+    scenario: str                   # "baseline" | "mesh" (used as folder + run_id prefix)
+    sweep_stamp: str                # e.g. "20260424-1700" — shared by all runs in this sweep
     n_runs: int
     config_path: Path               # path to the YAML that produced this run
     llm_model: str
     llm_base_url: str
     llm_api_key: str
     workspace_root: Path
-    artifacts_dir: Path
+    artifacts_dir: Path              # repo-level artifacts root (without /sweeps)
     llm_temperature: float = 0.0
     llm_max_tokens: int = 4096
     llm_request_timeout: int = 120
@@ -87,31 +93,46 @@ async def run_once(cfg: RunConfig) -> RunResult:
 
     Creates a fresh run_id, builds the graph, ainvokes it, writes metrics.json.
     """
-    run_id = f"{cfg.run_id_prefix}_{uuid.uuid4().hex[:8]}"
-    artifacts_run_dir = cfg.artifacts_dir / run_id
+    run_id = f"{cfg.scenario}_{cfg.sweep_stamp}_{uuid.uuid4().hex[:8]}"
+    artifacts_run_dir = (
+        cfg.artifacts_dir / "sweeps" / cfg.sweep_stamp / cfg.scenario / run_id
+    )
     outputs_dir = artifacts_run_dir / "outputs"
     outputs_dir.mkdir(parents=True, exist_ok=True)
 
-    metrics = RunMetrics(run_id=run_id)
+    metrics = RunMetrics(
+        run_id=run_id, scenario=cfg.scenario, sweep_stamp=cfg.sweep_stamp
+    )
     lf = get_langfuse()
     cb = get_callback(lf)
     invoke_config = {"callbacks": [cb]} if cb else {}
 
-    # Build LLM and load MCP tools for this run
+    # Build LLM and tools for this run
     llm = _make_llm(cfg)
-    tools = await create_mcp_tools(cfg.workspace_root)
+    set_workspace_root(cfg.workspace_root)
+    tools = get_tools()
     graph = build_graph(llm, tools)
+
+    # Clear workspace outputs dir before each run to prevent stale files from a
+    # prior run being copied if this run writes fewer files than expected.
+    workspace_outputs_dir = cfg.workspace_root / "outputs"
+    if workspace_outputs_dir.exists():
+        for _f in workspace_outputs_dir.iterdir():
+            if _f.is_file():
+                _f.unlink()
 
     initial_state: BaselineState = {
         "run_id": run_id,
         "task_description": "Triage citizen feedback → action brief → response drafts",
-        "feedback_files": [],   # nodes use MCP list_directory instead
-        "policy_content": "",   # nodes use MCP read_file instead
+        "feedback_files": [],   # nodes use list_directory tool instead
+        "policy_content": "",   # nodes use read_file tool instead
         "triage_result": None,
         "brief_result": None,
         "response_result": None,
         "error": None,
         "step_trace": [],
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
     }
 
     t0 = time.perf_counter()
@@ -119,6 +140,8 @@ async def run_once(cfg: RunConfig) -> RunResult:
         result_state = await graph.ainvoke(initial_state, config=invoke_config)
         metrics.total_latency_s = time.perf_counter() - t0
         metrics.step_trace = result_state.get("step_trace", [])
+        metrics.total_prompt_tokens = result_state.get("prompt_tokens", 0)
+        metrics.total_completion_tokens = result_state.get("completion_tokens", 0)
         success = result_state.get("error") is None
         error_msg = result_state.get("error")
     except AIPInternError as e:
@@ -134,6 +157,13 @@ async def run_once(cfg: RunConfig) -> RunResult:
 
     metrics_path = artifacts_run_dir / "metrics.json"
     metrics.write(metrics_path)
+
+    # Copy workspace outputs to artifact outputs dir (tools write to workspace/outputs/)
+    workspace_outputs = cfg.workspace_root / "outputs"
+    if workspace_outputs.exists():
+        for f in workspace_outputs.iterdir():
+            if f.is_file():
+                shutil.copy2(f, outputs_dir / f.name)
 
     return RunResult(
         run_id=run_id,

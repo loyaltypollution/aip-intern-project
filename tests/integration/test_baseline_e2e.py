@@ -13,7 +13,8 @@ from aip_intern.baseline.runner import RunConfig, run_once
 async def test_baseline_single_run_produces_outputs(live_llm, tmp_path):
     """Full baseline run: all 3 output files produced, no error."""
     cfg = RunConfig(
-        run_id_prefix="integration_test",
+        scenario="integration_test",
+        sweep_stamp="itest",
         n_runs=1,
         config_path=Path("config/baseline.yaml"),
         llm_model=os.environ.get("OPENAI_MODEL", "Qwen/Qwen3-32B-Instruct"),

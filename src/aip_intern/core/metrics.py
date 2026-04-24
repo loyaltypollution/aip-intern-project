@@ -49,6 +49,9 @@ class RunMetrics:
     # Phase 2 mesh metrics — None for baseline
     message_count: Optional[int] = None
     state_size_bytes: Optional[int] = None
+    # Sweep context — duplicated from parent path for self-contained metrics.
+    scenario: Optional[str] = None
+    sweep_stamp: Optional[str] = None
 
     def write(self, path: Path) -> None:
         """Write metrics to a JSON file. Creates parent directories if needed."""

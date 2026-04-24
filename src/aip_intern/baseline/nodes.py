@@ -51,16 +51,24 @@ async def _invoke_with_tools(llm, messages, tools):
     Each tool result is appended as a ToolMessage so the model can use it.
     Raises MalformedOutputError if a tool call fails or if 10 iterations are
     exhausted without a final text response.
+
+    Returns:
+        (response, prompt_tokens, completion_tokens) tuple.
     """
     from langchain_core.messages import ToolMessage
 
     bound = llm.bind_tools(tools) if tools else llm
     messages = list(messages)
+    prompt_tokens = 0
+    completion_tokens = 0
     for _ in range(10):
         response = await bound.ainvoke(messages)
+        usage = getattr(response, "usage_metadata", None) or {}
+        prompt_tokens += usage.get("input_tokens", 0)
+        completion_tokens += usage.get("output_tokens", 0)
         messages.append(response)
         if not (hasattr(response, "tool_calls") and response.tool_calls):
-            return response
+            return response, prompt_tokens, completion_tokens
         tool_map = {t.name: t for t in tools}
         for tc in response.tool_calls:
             try:
@@ -90,10 +98,12 @@ async def triage_node(
             SystemMessage(content=_load_prompt("triage.txt")),
             HumanMessage(content=_build_context(state)),
         ]
-        await _invoke_with_tools(llm, messages, tools)
+        _, pt, ct = await _invoke_with_tools(llm, messages, tools)
         return {
             "triage_result": "outputs/triage.csv",
             "step_trace": state["step_trace"] + ["triage_node"],
+            "prompt_tokens": state.get("prompt_tokens", 0) + pt,
+            "completion_tokens": state.get("completion_tokens", 0) + ct,
         }
     except AIPInternError:
         raise
@@ -117,10 +127,12 @@ async def brief_node(
             SystemMessage(content=_load_prompt("brief.txt")),
             HumanMessage(content=_build_context(state)),
         ]
-        await _invoke_with_tools(llm, messages, tools)
+        _, pt, ct = await _invoke_with_tools(llm, messages, tools)
         return {
             "brief_result": "outputs/brief.md",
             "step_trace": state["step_trace"] + ["brief_node"],
+            "prompt_tokens": state.get("prompt_tokens", 0) + pt,
+            "completion_tokens": state.get("completion_tokens", 0) + ct,
         }
     except AIPInternError:
         raise
@@ -144,10 +156,12 @@ async def response_node(
             SystemMessage(content=_load_prompt("response.txt")),
             HumanMessage(content=_build_context(state)),
         ]
-        await _invoke_with_tools(llm, messages, tools)
+        _, pt, ct = await _invoke_with_tools(llm, messages, tools)
         return {
             "response_result": "outputs/response_templates.md",
             "step_trace": state["step_trace"] + ["response_node"],
+            "prompt_tokens": state.get("prompt_tokens", 0) + pt,
+            "completion_tokens": state.get("completion_tokens", 0) + ct,
         }
     except AIPInternError:
         raise
