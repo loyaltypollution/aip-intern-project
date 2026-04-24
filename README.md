@@ -44,6 +44,31 @@ cd infra/ansible && ansible-playbook -i inventory.sh playbooks/site.yml
 ansible-playbook -i inventory.sh playbooks/run_sweep.yml -e sweep_type=baseline
 ```
 
+## Langfuse trace export
+
+The `run_sweep.yml` playbook dumps every Langfuse trace created during a sweep to
+`artifacts/langfuse/langfuse_export_{sweep_type}_{UTC_timestamp}.ndjson` (one
+trace JSON per line, including observations). Traces are exported before the GPU
+box is torn down, so they survive teardown. The step is skipped silently if
+`infra/langfuse/credentials.env` is missing.
+
+Quick read:
+
+```python
+import json
+for line in open("artifacts/langfuse/langfuse_export_baseline_20260101T120000Z.ndjson"):
+    trace = json.loads(line)
+    print(trace["id"], trace.get("name"), len(trace.get("observations") or []))
+```
+
+Analysis helper (joins traces to `metrics.json` by `run_id`):
+
+```python
+from analysis.langfuse import load_traces, trace_for_run
+df_traces = load_traces("artifacts/langfuse/")
+trace_for_run(df_traces, "baseline_a1b2c3d4")
+```
+
 ## Testing
 
 ```bash
@@ -51,7 +76,45 @@ pytest                           # unit tests only (no LLM required)
 pytest -m integration            # requires OPENAI_BASE_URL in env
 ```
 
-## Notebook output policy
-- `00_overview.ipynb` — outputs stripped (documentation)
-- `01_run.ipynb` — outputs committed (experiment record)
-- `02_analysis.ipynb` — outputs committed (analysis record)
+## Notebook layout and policy
+
+Each phase folder contains three notebooks:
+
+| File | Purpose | Outputs |
+|---|---|---|
+| `00_overview.ipynb` | Phase framing, architecture diagram | stripped (docs) |
+| `01_run.ipynb` | Live execution record for one sweep | committed |
+| `02_analysis.ipynb` | Multi-run analysis for the phase's question | committed |
+
+Top-level notebooks (not tied to one phase):
+
+| File | Purpose |
+|---|---|
+| `notebooks/drift.ipynb` | Cross-sweep trend monitor (baseline/mesh means, mesh-minus-baseline delta) across every sweep_stamp on disk |
+
+### Authoring workflow (Jupytext pairing)
+
+Every `02_analysis.ipynb` and `drift.ipynb` is paired with a sibling `.py`
+(percent format). The `.py` is the edit target — diffable, reviewable, no
+ipynb-output noise — and the `.ipynb` is the executed artifact.
+
+```bash
+# Edit the .py, then regenerate the .ipynb with outputs:
+jupytext --to ipynb notebooks/phase2_mesh/02_analysis.py
+AIP_SWEEP_STAMP=20260423-2003 \
+  jupyter nbconvert --to notebook --execute --inplace notebooks/phase2_mesh/02_analysis.ipynb
+
+# Or keep .py and .ipynb in sync after editing either side:
+jupytext --sync notebooks/**/*.ipynb
+```
+
+Pick a sweep with `AIP_SWEEP_STAMP=<stamp>`; omit it to use the most recently
+written sweep on disk (`analysis.aggregate.latest_sweep` — mtime-sorted, not
+lexicographic).
+
+### Deciding on mesh
+
+`phase2_mesh/02_analysis.ipynb` is the decision notebook. It tests mesh
+against a pre-registered cost budget (bounded latency/token premium over
+baseline) with bootstrap 95% CIs. Quality comparison lives in Phase 5; until
+then Phase 2 assumes mesh output is at-best equal to baseline output.
