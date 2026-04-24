@@ -1,8 +1,6 @@
 """Metric collection for aip-intern-project.
 
 Stores per-node and per-run metrics. Writes to artifacts/{run_id}/metrics.json.
-This is one of two metric sinks — the other is Langfuse (see tracing.py).
-These are independent: disabling Langfuse does not affect metrics.json.
 
 Metric keys (see spec Metrics Table):
   - end_to_end_latency_s, per_node_latency (in nodes[].latency_s)
@@ -49,9 +47,6 @@ class RunMetrics:
     # Phase 2 mesh metrics — None for baseline
     message_count: Optional[int] = None
     state_size_bytes: Optional[int] = None
-    # Clickable Langfuse trace URL (built from LANGFUSE_HOST_PUBLIC + trace_id).
-    # None if Langfuse was disabled or the trace_id could not be captured.
-    langfuse_trace_url: Optional[str] = None
     # Sweep context — duplicated from parent path for self-contained metrics.
     scenario: Optional[str] = None
     sweep_stamp: Optional[str] = None

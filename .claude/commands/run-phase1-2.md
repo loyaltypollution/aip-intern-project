@@ -39,7 +39,7 @@ find infra -type f \( -name "*.tf" -o -name "*.yml" -o -name "*.yaml" \
   -exec perl -pi -e 's/\r\n/\n/g' {} +
 chmod +x infra/ansible/inventory.sh
 
-# Bootstrap GPU + CPU + Langfuse (~35–50 min)
+# Bootstrap GPU + CPU (~35–50 min)
 (cd infra/ansible && ansible-playbook playbooks/site.yml)
 ```
 
@@ -97,8 +97,6 @@ ansible runs so their data co-locates:
 
     artifacts/sweeps/{sweep_stamp}/baseline/{run_id}/metrics.json
     artifacts/sweeps/{sweep_stamp}/mesh/{run_id}/metrics.json
-    artifacts/sweeps/{sweep_stamp}/langfuse_baseline.ndjson
-    artifacts/sweeps/{sweep_stamp}/langfuse_mesh.ndjson
 
 ```bash
 export SWEEP_STAMP=$(date -u +%Y%m%d-%H%M)
@@ -146,8 +144,7 @@ The playbook: starts vLLM → probes `/v1/models` + inference (up to ~15min) →
 uses the passed `sweep_stamp` (or fallback to CPU `date`) and exports
 `AIP_SWEEP_STAMP` → runs `scripts/run_baseline.py --config config/baseline.yaml`
 on the CPU box → stops vLLM → rsyncs
-`artifacts/sweeps/{sweep_stamp}/{scenario}/` + `langfuse_{scenario}.ndjson`
-back to local.
+`artifacts/sweeps/{sweep_stamp}/{scenario}/` back to local.
 
 **NB on tee path:** use the absolute `$LOG` from above — `tee` runs in the
 parent shell's cwd, not inside the `(cd ...)` subshell.
@@ -206,31 +203,6 @@ echo "Comparison written to ${OUT}"
 ```
 
 ### Stage 3b: Trace Inspection
-
-Three trace levels, in order of "answers the question fastest":
-
-**Per-run Langfuse URL** (requires infra alive). Every `metrics.json` has a
-`langfuse_trace_url` scoped to `LANGFUSE_HOST_PUBLIC`:
-```bash
-python3 -c "
-import json, glob, sys
-stamp = sys.argv[1]
-for p in sorted(glob.glob(f'artifacts/sweeps/{stamp}/mesh/*/metrics.json'))[:5]:
-    m = json.load(open(p))
-    print(m['run_id'], m.get('langfuse_trace_url'))
-" "$SWEEP_STAMP"
-```
-Click a URL → LangGraph node spans, per-LLM-call prompt/completion, CrewAI task
-tree, per-node latency. The right tool for "why is *this* run slow" and "what
-did the agents actually say to each other".
-
-**Offline NDJSON export** (infra can be torn down) — now co-located with
-metrics under the pair dir:
-```bash
-ls artifacts/sweeps/${SWEEP_STAMP}/
-jq '.observations | length' \
-   artifacts/sweeps/${SWEEP_STAMP}/langfuse_mesh.ndjson | head
-```
 
 **Cross-sweep diff** — stamps are `YYYYMMDD-HHMM`; `git log --since` needs ISO:
 ```bash
@@ -333,7 +305,6 @@ Append to `docs/phase1-2-run-log.md`:
 | Sweep scripts (remote) | `~/aip-intern-project/scripts/run_{baseline,mesh}.py` |
 | Workspace tools (local Python) | `src/aip_intern/{baseline,mesh}/tools.py` |
 | Artifacts (after rsync) | `artifacts/sweeps/{sweep_stamp}/{scenario}/{run_id}/` |
-| Langfuse NDJSON exports | `artifacts/sweeps/{sweep_stamp}/langfuse_{scenario}.ndjson` |
 | Notebooks (parameterized) | `notebooks/sweep_analysis.ipynb`, `notebooks/cross_sweep.ipynb` |
 | Analysis | `analysis/aggregate.py`, `analysis/compare.py` |
 | Run log | `docs/phase1-2-run-log.md` |
@@ -350,24 +321,3 @@ Append to `docs/phase1-2-run-log.md`:
 | `message_count` | — | ✓ | Inter-agent messages in crew |
 | `state_size_bytes` | — | ✓ | Serialised LangGraph state at crew_node return |
 
-## Langfuse (self-hosted on CPU box)
-
-Runs in Docker on the CPU box via `playbooks/setup_langfuse.yml` (included by
-`site.yml`). `run_sweep.yml` reads `infra/langfuse/credentials.env` and injects
-`LANGFUSE_HOST` + `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY` into the sweep
-subprocess. If the credentials file is absent the sweep runs without tracing
-— no error.
-
-**UI access:**
-```bash
-CPU_IP=$(cd infra/terraform && terraform output -raw cpu_public_ip)
-echo "http://${CPU_IP}:3000"
-cat infra/langfuse/credentials.env   # UI user + password + API keys
-```
-
-**First-boot seed caveat:** `LANGFUSE_INIT_*` only applies against an empty
-Postgres. If you keep the DB volume across restarts, later secret changes are
-silently ignored. To rotate keys: `docker compose down -v` on the CPU box *and*
-`rm -rf infra/langfuse/secrets/ infra/langfuse/credentials.env` locally, then
-re-run the playbook. Clickhouse first-boot migrations take 2–5 min — the
-playbook waits up to 10 min for `/api/public/health`.

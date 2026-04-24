@@ -77,10 +77,6 @@ class AppConfig:
     llm: LLMCfg
     workspace: WorkspaceCfg
     artifacts: ArtifactsCfg
-    langfuse_enabled: bool = False
-    langfuse_public_key: str = ""
-    langfuse_secret_key: str = ""
-    langfuse_host: str = "http://localhost:3000"
 
 
 def load_config(path: Path) -> AppConfig:
@@ -92,10 +88,6 @@ def load_config(path: Path) -> AppConfig:
         llm=LLMCfg(**resolved["llm"]),
         workspace=WorkspaceCfg(**resolved.get("workspace", {})),
         artifacts=ArtifactsCfg(**resolved.get("artifacts", {})),
-        langfuse_enabled=resolved.get("langfuse_enabled", False),
-        langfuse_public_key=resolved.get("langfuse_public_key", ""),
-        langfuse_secret_key=resolved.get("langfuse_secret_key", ""),
-        langfuse_host=resolved.get("langfuse_host", "http://localhost:3000"),
     )
 
 
@@ -129,4 +121,3 @@ class RunResult:
     error: Optional[str]              # exception message if success=False
     metrics: dict                     # keys match Metrics Table in spec
     outputs_path: Path                # path to artifacts/{run_id}/outputs/
-    langfuse_trace_url: Optional[str]

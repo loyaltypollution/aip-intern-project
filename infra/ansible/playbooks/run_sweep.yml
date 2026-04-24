@@ -120,25 +120,6 @@
       ignore_errors: true
       when: not (skip_aiperf | bool)
 
-    - name: Load Langfuse credentials if present
-      ansible.builtin.slurp:
-        src: /opt/langfuse/docker-compose.yml
-      register: lf_compose_probe
-      ignore_errors: true
-      changed_when: false
-
-    - name: Read local Langfuse credentials file if present
-      ansible.builtin.set_fact:
-        lf_creds_text: "{{ lookup('file', playbook_dir ~ '/../../langfuse/credentials.env', errors='ignore') | default('', true) }}"
-      delegate_to: localhost
-      run_once: true
-
-    - name: Parse Langfuse keys from credentials file
-      ansible.builtin.set_fact:
-        lf_public_key: "{{ (lf_creds_text | regex_search('LANGFUSE_PUBLIC_KEY=(.+)', '\\1') | default([''], true))[0] | default('', true) }}"
-        lf_secret_key: "{{ (lf_creds_text | regex_search('LANGFUSE_SECRET_KEY=(.+)', '\\1') | default([''], true))[0] | default('', true) }}"
-      run_once: true
-
     # Pair semantics: one sweep_stamp covers a baseline+mesh pair. The skill
     # passes `-e sweep_stamp=...` to both ansible invocations so they write
     # into the same dir. If no -e override, fall back to CPU's current UTC
@@ -164,12 +145,6 @@
         export OPENAI_API_KEY="not-needed-for-vllm"
         export OPENAI_MODEL="{{ scenarios[scenario].model }}"
         export AIP_SWEEP_STAMP="{{ sweep_stamp }}"
-        {% if lf_public_key | length > 0 and lf_secret_key | length > 0 %}
-        export LANGFUSE_HOST="http://127.0.0.1:3000"
-        export LANGFUSE_HOST_PUBLIC="http://{{ hostvars[groups['cpu'][0]].inventory_hostname }}:3000"
-        export LANGFUSE_PUBLIC_KEY="{{ lf_public_key }}"
-        export LANGFUSE_SECRET_KEY="{{ lf_secret_key }}"
-        {% endif %}
         python scripts/run_{{ sweep_type }}.py --config config/{{ sweep_type }}.yaml 2>&1 | tee ~/sweep_{{ sweep_type }}.log
       args:
         executable: /bin/bash
@@ -178,84 +153,6 @@
       poll: 30
       register: sweep_result
       ignore_errors: true
-
-    - name: Export Langfuse traces from sweep window to NDJSON
-      shell: |
-        set -o pipefail
-        python3 - <<'PYEOF'
-        import base64, json, os, sys, urllib.parse, urllib.request
-
-        host   = "http://127.0.0.1:3000"
-        pk     = os.environ["LF_PK"]
-        sk     = os.environ["LF_SK"]
-        since  = os.environ["LF_FROM"]
-        outp   = os.environ["LF_OUT"]
-
-        auth = base64.b64encode(f"{pk}:{sk}".encode()).decode()
-        headers = {"Authorization": f"Basic {auth}", "Accept": "application/json"}
-
-        def http_get(path, params=None):
-            url = host + path
-            if params:
-                url += "?" + urllib.parse.urlencode(params)
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=60) as r:
-                return json.loads(r.read())
-
-        # 1) List traces since sweep start (paginated)
-        trace_ids = []
-        page = 1
-        while True:
-            data = http_get("/api/public/traces", {
-                "fromTimestamp": since,
-                "page": page,
-                "limit": 50,
-                "orderBy": "timestamp.asc",
-            })
-            items = data.get("data", [])
-            if not items:
-                break
-            trace_ids.extend([t["id"] for t in items])
-            meta = data.get("meta", {})
-            total_pages = meta.get("totalPages", page)
-            if page >= total_pages:
-                break
-            page += 1
-
-        # 2) Fetch each trace fully resolved (includes observations) and dump NDJSON
-        n_ok = n_err = 0
-        with open(outp, "w") as f:
-            for tid in trace_ids:
-                try:
-                    full = http_get(f"/api/public/traces/{urllib.parse.quote(tid)}")
-                    f.write(json.dumps(full, separators=(",", ":")) + "\n")
-                    n_ok += 1
-                except Exception as e:
-                    sys.stderr.write(f"trace {tid} fetch failed: {e}\n")
-                    n_err += 1
-        print(f"Exported {n_ok} traces ({n_err} errors) -> {outp}")
-        PYEOF
-      args:
-        executable: /bin/bash
-      environment:
-        LF_PK: "{{ lf_public_key }}"
-        LF_SK: "{{ lf_secret_key }}"
-        LF_FROM: "{{ sweep_start_ts }}"
-        LF_OUT: "/home/ubuntu/aip-intern-project/artifacts/sweeps/{{ sweep_stamp }}/langfuse_{{ sweep_type }}.ndjson"
-      # Langfuse runs on the CPU host (see setup_langfuse.yml), so we execute
-      # the export locally on CPU — no delegation. Delegating to GPU would hit
-      # 127.0.0.1:3000 on a host where Langfuse isn't running.
-      when:
-        - sweep_type is defined
-        - lf_public_key | length > 0
-        - lf_secret_key | length > 0
-      register: lf_export_result
-      ignore_errors: true
-
-    - name: Show Langfuse export result
-      debug:
-        msg: "{{ lf_export_result.stdout | default('(skipped — no Langfuse creds)') }}"
-      when: lf_export_result is defined
 
     - name: Show sweep tail
       debug:
@@ -280,24 +177,6 @@
       async: "{{ nemo_eval_timeout }}"
       poll: 30
       ignore_errors: true
-
-- name: Sync Langfuse trace export from CPU to local machine
-  hosts: cpu
-  gather_facts: false
-  tasks:
-    - name: Write rsync SSH wrapper script (cpu host leg)
-      ansible.builtin.copy:
-        content: |
-          #!/bin/sh
-          exec ssh -i "{{ playbook_dir }}/../../ssh/aip-intern-generated-key.pem" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$@"
-        dest: /tmp/aip_intern_rsync_ssh.sh
-        mode: '0755'
-      delegate_to: localhost
-      run_once: true
-
-    # Langfuse NDJSON now lives under the sweep's pair dir, so it's pulled
-    # together with the run metrics by the "Sync this sweep's artifact dir"
-    # step further down. No separate rsync needed.
 
 - name: Stop vLLM for {{ scenario }}
   hosts: gpu
@@ -358,9 +237,8 @@
       delegate_to: localhost
       when: hostvars[groups['cpu'][0]].sweep_stamp is defined
 
-    # Pull this scenario's runs (and the langfuse export we wrote beside them)
-    # from the pair dir. Layout both sides:
-    # artifacts/sweeps/{sweep_stamp}/{scenario}/{run_id}/ + langfuse_{scenario}.ndjson
+    # Pull this scenario's runs from the pair dir.
+    # Layout: artifacts/sweeps/{sweep_stamp}/{scenario}/{run_id}/
     - name: Sync this scenario's runs under the pair dir
       ansible.posix.synchronize:
         src: "/home/ubuntu/aip-intern-project/artifacts/sweeps/{{ hostvars[groups['cpu'][0]].sweep_stamp }}/{{ scenario }}/"
@@ -370,19 +248,6 @@
           - "--rsh=/tmp/aip_intern_rsync_ssh.sh"
       delegate_to: localhost
       when: hostvars[groups['cpu'][0]].sweep_stamp is defined
-
-    - name: Sync Langfuse NDJSON export (co-located with runs)
-      ansible.posix.synchronize:
-        src: "/home/ubuntu/aip-intern-project/artifacts/sweeps/{{ hostvars[groups['cpu'][0]].sweep_stamp }}/langfuse_{{ sweep_type }}.ndjson"
-        dest: "{{ playbook_dir }}/../../../artifacts/sweeps/{{ hostvars[groups['cpu'][0]].sweep_stamp }}/langfuse_{{ sweep_type }}.ndjson"
-        mode: pull
-        rsync_opts:
-          - "--rsh=/tmp/aip_intern_rsync_ssh.sh"
-      delegate_to: localhost
-      when:
-        - hostvars[groups['cpu'][0]].sweep_stamp is defined
-        - lf_public_key | default('') | length > 0
-      ignore_errors: true
 
     - name: Sync sweep log to local machine
       ansible.posix.synchronize:

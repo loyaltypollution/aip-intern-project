@@ -44,31 +44,6 @@ cd infra/ansible && ansible-playbook -i inventory.sh playbooks/site.yml
 ansible-playbook -i inventory.sh playbooks/run_sweep.yml -e sweep_type=baseline
 ```
 
-## Langfuse trace export
-
-The `run_sweep.yml` playbook dumps every Langfuse trace created during a sweep to
-`artifacts/langfuse/langfuse_export_{sweep_type}_{UTC_timestamp}.ndjson` (one
-trace JSON per line, including observations). Traces are exported before the GPU
-box is torn down, so they survive teardown. The step is skipped silently if
-`infra/langfuse/credentials.env` is missing.
-
-Quick read:
-
-```python
-import json
-for line in open("artifacts/langfuse/langfuse_export_baseline_20260101T120000Z.ndjson"):
-    trace = json.loads(line)
-    print(trace["id"], trace.get("name"), len(trace.get("observations") or []))
-```
-
-Analysis helper (joins traces to `metrics.json` by `run_id`):
-
-```python
-from analysis.langfuse import load_traces, trace_for_run
-df_traces = load_traces("artifacts/langfuse/")
-trace_for_run(df_traces, "baseline_a1b2c3d4")
-```
-
 ## Testing
 
 ```bash

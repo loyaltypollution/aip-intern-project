@@ -16,7 +16,6 @@ Usage from notebooks:
 from __future__ import annotations
 
 import dataclasses
-import os
 import shutil
 import time
 import uuid
@@ -29,7 +28,6 @@ from aip_intern.baseline.state import BaselineState
 from aip_intern.core.exceptions import AIPInternError
 from aip_intern.core.metrics import RunMetrics
 from aip_intern.baseline.tools import get_tools, set_workspace_root
-from aip_intern.core.tracing import get_callback, get_langfuse
 
 
 @dataclass
@@ -70,26 +68,6 @@ class RunResult:
     error: Optional[str]
     metrics: dict                  # serialised RunMetrics — keys per spec Metrics Table
     outputs_path: Path             # artifacts/{run_id}/outputs/
-    langfuse_trace_url: Optional[str] = None
-
-
-def _build_public_trace_url(lf, trace_id: Optional[str]) -> Optional[str]:
-    """Build a clickable trace URL from a trace_id.
-
-    Prefers LANGFUSE_HOST_PUBLIC (external IP:port) over LANGFUSE_HOST (loopback
-    from the CPU box) so the link is reachable from a laptop. Falls back to the
-    SDK's own `get_trace_url` which uses LANGFUSE_HOST.
-    """
-    if lf is None or not trace_id:
-        return None
-    host = os.environ.get("LANGFUSE_HOST_PUBLIC")
-    if host:
-        return f"{host.rstrip('/')}/trace/{trace_id}"
-    # SDK fallback — uses whatever host the client was constructed with.
-    try:
-        return lf.get_trace_url(trace_id=trace_id)
-    except Exception:
-        return None
 
 
 def _make_llm(cfg: RunConfig):
@@ -123,9 +101,6 @@ async def run_once(cfg: RunConfig) -> RunResult:
     metrics = RunMetrics(
         run_id=run_id, scenario=cfg.scenario, sweep_stamp=cfg.sweep_stamp
     )
-    lf = get_langfuse()
-    cb = get_callback(lf)
-    invoke_config = {"callbacks": [cb]} if cb else {}
 
     # Build LLM and tools for this run
     llm = _make_llm(cfg)
@@ -156,17 +131,8 @@ async def run_once(cfg: RunConfig) -> RunResult:
     }
 
     t0 = time.perf_counter()
-    trace_id: Optional[str] = None
     try:
-        # Open a Langfuse span so a trace_id exists for the duration of the
-        # invoke. The langchain callback emits observations under that trace,
-        # so the URL we stamp into metrics.json actually resolves in the UI.
-        if lf is not None:
-            with lf.start_as_current_span(name=f"run_once/{run_id}"):
-                trace_id = lf.get_current_trace_id()
-                result_state = await graph.ainvoke(initial_state, config=invoke_config)
-        else:
-            result_state = await graph.ainvoke(initial_state, config=invoke_config)
+        result_state = await graph.ainvoke(initial_state)
         metrics.total_latency_s = time.perf_counter() - t0
         metrics.step_trace = result_state.get("step_trace", [])
         metrics.total_prompt_tokens = result_state.get("prompt_tokens", 0)
@@ -184,14 +150,6 @@ async def run_once(cfg: RunConfig) -> RunResult:
         error_msg = f"Unexpected error: {e}"
         metrics.error = error_msg
 
-    # Flush the span to make sure the trace exists before we publish the URL.
-    if lf is not None:
-        try:
-            lf.flush()
-        except Exception:
-            pass
-    metrics.langfuse_trace_url = _build_public_trace_url(lf, trace_id)
-
     metrics_path = artifacts_run_dir / "metrics.json"
     metrics.write(metrics_path)
 
@@ -208,7 +166,6 @@ async def run_once(cfg: RunConfig) -> RunResult:
         error=error_msg if not success else None,
         metrics=dataclasses.asdict(metrics),
         outputs_path=outputs_dir,
-        langfuse_trace_url=metrics.langfuse_trace_url,
     )
 
 

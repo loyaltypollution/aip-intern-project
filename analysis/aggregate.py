@@ -31,14 +31,6 @@ from pathlib import Path
 import pandas as pd
 
 
-def _trace_id_from_url(url: str | None) -> str | None:
-    """Extract the trace_id from a Langfuse URL (`…/trace/<id>`)."""
-    if not url:
-        return None
-    tail = url.rsplit("/trace/", 1)
-    return tail[1] if len(tail) == 2 else None
-
-
 def list_sweeps(
     artifacts_dir: str | Path, by: str = "mtime"
 ) -> list[tuple[str, set[str]]]:
@@ -84,12 +76,7 @@ def load_runs(
 
     Returns one row per run with columns: run_id, scenario, sweep_stamp,
     total_latency_s, total_prompt_tokens, total_completion_tokens, error,
-    step_trace, step_trace_len, message_count, state_size_bytes,
-    langfuse_trace_id, langfuse_trace_url.
-
-    `langfuse_trace_url` points at an ephemeral EC2 host and is dead once
-    `terraform destroy` has run. `langfuse_trace_id` is the stable handle that
-    cross-references the preserved `langfuse_<scenario>.ndjson` dumps.
+    step_trace, step_trace_len, message_count, state_size_bytes.
     """
     root = Path(artifacts_dir) / "sweeps"
     if not root.exists():
@@ -125,8 +112,6 @@ def load_runs(
             "step_trace_len": len(m.get("step_trace", [])),
             "message_count": m.get("message_count"),
             "state_size_bytes": m.get("state_size_bytes"),
-            "langfuse_trace_id": _trace_id_from_url(m.get("langfuse_trace_url")),
-            "langfuse_trace_url": m.get("langfuse_trace_url"),
         })
     if mismatches:
         import warnings
