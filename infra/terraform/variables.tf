@@ -15,12 +15,6 @@ variable "allowed_ssh_cidr" {
   type        = string
 }
 
-variable "extra_tags" {
-  description = "Additional tags to merge"
-  type        = map(string)
-  default     = {}
-}
-
 variable "instance_state" {
   type    = string
   default = "running"

@@ -1,12 +1,9 @@
 locals {
   name_prefix = "aip-intern"
-  tags = merge(
-    {
-      Project     = "aip-intern-project"
-      Environment = "aip-intern"
-    },
-    var.extra_tags
-  )
+  tags = {
+    Project     = "aip-intern-project"
+    Environment = "aip-intern"
+  }
 }
 
 resource "aws_vpc" "main" {
@@ -66,6 +63,14 @@ resource "aws_security_group" "client" {
     description = "SSH from laptop"
     from_port   = 22
     to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.allowed_ssh_cidr]
+  }
+
+  ingress {
+    description = "Langfuse UI from laptop"
+    from_port   = 3000
+    to_port     = 3000
     protocol    = "tcp"
     cidr_blocks = [var.allowed_ssh_cidr]
   }

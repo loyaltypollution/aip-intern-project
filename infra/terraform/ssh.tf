@@ -43,9 +43,9 @@ resource "null_resource" "wait_for_ips" {
       fi
       echo "Waiting for instances to receive public IPs..."
       for i in $(seq 1 60); do
-        GPU_IP=${aws_instance.gpu.id} \
+        GPU_IP=$(aws ec2 describe-instances --instance-ids ${aws_instance.gpu.id} \
           --query 'Reservations[0].Instances[0].PublicIpAddress' --output text 2>/dev/null)
-        CPU_IP=${aws_instance.cpu.id} \
+        CPU_IP=$(aws ec2 describe-instances --instance-ids ${aws_instance.cpu.id} \
           --query 'Reservations[0].Instances[0].PublicIpAddress' --output text 2>/dev/null)
         if [ "$GPU_IP" != "None" ] && [ -n "$GPU_IP" ] && \
            [ "$CPU_IP" != "None" ] && [ -n "$CPU_IP" ]; then
