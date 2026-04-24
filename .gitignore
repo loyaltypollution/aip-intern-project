@@ -6,3 +6,29 @@ __pycache__/
 *.egg-info/
 dist/
 .ruff_cache/
+infra/langfuse/secrets/
+infra/langfuse/credentials.env
+infra/terraform/terraform.tfvars
+infra/terraform/terraform.tfstate*
+infra/terraform/.terraform/
+infra/terraform/tfplan
+
+# Timestamped executed-notebook snapshots (one-off exports; the canonical
+# executed record lives in the checked-in 02_analysis.ipynb).
+notebooks/*_2026*.ipynb
+notebooks/**/*_2026*.ipynb
+
+.ipynb_checkpoints/
+.claude/scheduled_tasks.lock
+
+# macOS
+.DS_Store
+
+# SSH private keys
+*.pem
+
+# macOS
+.DS_Store
+
+# SSH private keys
+*.pem

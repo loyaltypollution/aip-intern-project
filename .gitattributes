@@ -1,6 +1,7 @@
 # Strip outputs from overview notebooks (they are documentation, not records)
 notebooks/**/00_overview.ipynb filter=nbstripout
 
-# 01_run.ipynb and 02_analysis.ipynb outputs are committed — they are the experiment record
+# 01_run.ipynb, 02_analysis.ipynb, and drift.ipynb outputs are committed —
+# they are the experiment / analysis record.
 
 *.ipynb diff=ipynb
