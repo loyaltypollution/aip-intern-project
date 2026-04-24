@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import datetime as _dt
+import os
 import sys
 from pathlib import Path
 
@@ -36,8 +38,12 @@ def main() -> None:
         sys.exit(1)
 
     app_cfg = load_config(config_path)
+    sweep_stamp = os.environ.get("AIP_SWEEP_STAMP") or _dt.datetime.utcnow().strftime(
+        "%Y%m%d-%H%M"
+    )
     run_cfg = RunConfig(
-        run_id_prefix=app_cfg.run.run_id_prefix,
+        scenario=app_cfg.run.run_id_prefix,
+        sweep_stamp=sweep_stamp,
         n_runs=1 if args.dry_run else app_cfg.run.n_runs,
         config_path=config_path,
         llm_model=app_cfg.llm.model,
@@ -46,7 +52,7 @@ def main() -> None:
         llm_temperature=app_cfg.llm.temperature,
         llm_max_tokens=app_cfg.llm.max_tokens,
         llm_request_timeout=app_cfg.llm.request_timeout,
-        workspace_root=Path(app_cfg.mcp.workspace_root),
+        workspace_root=Path(app_cfg.workspace.workspace_root),
         artifacts_dir=Path(app_cfg.artifacts.output_dir),
     )
 

@@ -73,7 +73,8 @@ def test_build_graph_compiles(mock_llm):
 @pytest.mark.asyncio
 async def test_run_once_returns_run_result(mock_llm, tmp_path):
     cfg = RunConfig(
-        run_id_prefix="test",
+        scenario="test",
+        sweep_stamp="utest",
         n_runs=1,
         config_path=Path("config/baseline.yaml"),
         llm_model="test-model",
@@ -82,13 +83,13 @@ async def test_run_once_returns_run_result(mock_llm, tmp_path):
         workspace_root=Path("workspace/"),
         artifacts_dir=tmp_path,
     )
-    # Patch _make_llm and create_mcp_tools so no real LLM or MCP server is needed
-    from unittest.mock import AsyncMock, patch
+    # Patch _make_llm and get_tools so no real LLM or filesystem tools are needed
+    from unittest.mock import patch
 
     from aip_intern.baseline import runner as runner_mod
 
-    with patch.object(runner_mod, "_make_llm", return_value=mock_llm), patch(
-        "aip_intern.baseline.runner.create_mcp_tools", new=AsyncMock(return_value=[])
+    with patch.object(runner_mod, "_make_llm", return_value=mock_llm), patch.object(
+        runner_mod, "get_tools", return_value=[]
     ):
         result = await run_once(cfg)
     assert result.run_id.startswith("test_")

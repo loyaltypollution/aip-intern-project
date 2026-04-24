@@ -1,8 +1,7 @@
 """OpenAI tool function definitions for CrewAI agents.
 
-CrewAI agents use these as function-call tools (not MCP). They provide
-read/write access to the workspace directory, analogous to phase3's MCP tools
-but through the OpenAI tool-calling protocol.
+CrewAI agents use these as direct function-call tools, providing read/write
+access to the workspace directory through the OpenAI tool-calling protocol.
 
 Phase 3 interns: to inject a MalformedOutputError, replace read_file or
 write_file with a version that raises MalformedOutputError on demand.

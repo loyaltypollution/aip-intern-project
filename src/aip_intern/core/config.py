@@ -62,7 +62,7 @@ class LLMCfg:
 
 
 @dataclass(frozen=True)
-class MCPCfg:
+class WorkspaceCfg:
     workspace_root: str = "workspace/"
 
 
@@ -75,7 +75,7 @@ class ArtifactsCfg:
 class AppConfig:
     run: RunCfg
     llm: LLMCfg
-    mcp: MCPCfg
+    workspace: WorkspaceCfg
     artifacts: ArtifactsCfg
     langfuse_enabled: bool = False
     langfuse_public_key: str = ""
@@ -90,7 +90,7 @@ def load_config(path: Path) -> AppConfig:
     return AppConfig(
         run=RunCfg(**resolved.get("run", {})),
         llm=LLMCfg(**resolved["llm"]),
-        mcp=MCPCfg(**resolved.get("mcp", {})),
+        workspace=WorkspaceCfg(**resolved.get("workspace", {})),
         artifacts=ArtifactsCfg(**resolved.get("artifacts", {})),
         langfuse_enabled=resolved.get("langfuse_enabled", False),
         langfuse_public_key=resolved.get("langfuse_public_key", ""),

@@ -13,7 +13,7 @@ llm:
   api_key: "test-key"
   temperature: 0.0
   max_tokens: 512
-mcp:
+workspace:
   workspace_root: "workspace/"
 artifacts:
   output_dir: "artifacts/"

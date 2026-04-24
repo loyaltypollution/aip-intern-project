@@ -15,8 +15,8 @@ class DocumentTask:
     """Describes what the agent pipeline should process and where to write outputs.
 
     Args:
-        feedback_dir: Directory containing feedback .txt files (MCP-relative path).
-        policy_path: Path to policy_snippets.md (MCP-relative path).
+        feedback_dir: Directory containing feedback .txt files (workspace-relative).
+        policy_path: Path to policy_snippets.md (workspace-relative).
         outputs_dir: Where to write triage.csv, brief.md, response_templates.md.
         description: Human-readable task description passed to the agent as context.
     """

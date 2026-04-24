@@ -32,7 +32,7 @@ def build_graph(llm: "BaseChatModel", tools: list["BaseTool"]):
 
     Args:
         llm: Chat model instance (real or mock).
-        tools: MCP filesystem tools. Pass [] for mock/unit test runs.
+        tools: workspace filesystem tools. Pass [] for mock/unit test runs.
 
     Returns:
         Compiled LangGraph ready for ainvoke().
