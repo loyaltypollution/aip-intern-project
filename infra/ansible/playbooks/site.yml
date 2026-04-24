@@ -9,3 +9,4 @@
 
 - import_playbook: setup_gpu.yml
 - import_playbook: setup_cpu.yml
+- import_playbook: setup_langfuse.yml

@@ -15,7 +15,7 @@ import shutil
 import time
 import uuid
 
-from aip_intern.baseline.runner import RunConfig, RunResult
+from aip_intern.baseline.runner import RunConfig, RunResult, _build_public_trace_url
 from aip_intern.core.exceptions import AIPInternError
 from aip_intern.core.metrics import RunMetrics
 from aip_intern.core.tracing import get_callback, get_langfuse
@@ -66,8 +66,14 @@ async def run_once(cfg: RunConfig) -> RunResult:
     graph = build_graph(llm_cfg, workspace_root=cfg.workspace_root)
 
     t0 = time.perf_counter()
+    trace_id = None
     try:
-        result_state = await graph.ainvoke(initial_state, config=invoke_config)
+        if lf is not None:
+            with lf.start_as_current_span(name=f"run_once/{run_id}"):
+                trace_id = lf.get_current_trace_id()
+                result_state = await graph.ainvoke(initial_state, config=invoke_config)
+        else:
+            result_state = await graph.ainvoke(initial_state, config=invoke_config)
         metrics.total_latency_s = time.perf_counter() - t0
         metrics.step_trace = result_state.get("step_trace", [])
         metrics.message_count = result_state.get("message_count", 0)
@@ -87,6 +93,12 @@ async def run_once(cfg: RunConfig) -> RunResult:
         error_msg = f"Unexpected error: {e}"
         metrics.error = error_msg
 
+    if lf is not None:
+        try:
+            lf.flush()
+        except Exception:
+            pass
+    metrics.langfuse_trace_url = _build_public_trace_url(lf, trace_id)
     metrics.write(artifacts_run_dir / "metrics.json")
 
     # Copy workspace outputs to artifact outputs dir (tools write to workspace/outputs/)
@@ -102,6 +114,7 @@ async def run_once(cfg: RunConfig) -> RunResult:
         error=error_msg if not success else None,
         metrics=dataclasses.asdict(metrics),
         outputs_path=outputs_dir,
+        langfuse_trace_url=metrics.langfuse_trace_url,
     )
 
 

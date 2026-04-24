@@ -49,6 +49,9 @@ class RunMetrics:
     # Phase 2 mesh metrics — None for baseline
     message_count: Optional[int] = None
     state_size_bytes: Optional[int] = None
+    # Clickable Langfuse trace URL (built from LANGFUSE_HOST_PUBLIC + trace_id).
+    # None if Langfuse was disabled or the trace_id could not be captured.
+    langfuse_trace_url: Optional[str] = None
     # Sweep context — duplicated from parent path for self-contained metrics.
     scenario: Optional[str] = None
     sweep_stamp: Optional[str] = None

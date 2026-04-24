@@ -35,11 +35,15 @@ def get_langfuse():
 
 
 def get_callback(langfuse_client) -> Optional[object]:
-    """Return a LangfuseCallbackHandler for use in LangGraph invoke config, or None."""
+    """Return a LangfuseCallbackHandler for use in LangGraph invoke config, or None.
+
+    v3 SDK: CallbackHandler lives at langfuse.langchain and reads the singleton
+    client from env vars — no explicit client argument.
+    """
     if langfuse_client is None:
         return None
     try:
-        from langfuse.callback import CallbackHandler
-        return CallbackHandler(client=langfuse_client)
+        from langfuse.langchain import CallbackHandler
+        return CallbackHandler()
     except Exception:
         return None
