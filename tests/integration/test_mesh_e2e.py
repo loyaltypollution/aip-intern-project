@@ -14,7 +14,8 @@ from aip_intern.mesh.runner import run_once
 async def test_mesh_single_run_produces_outputs(live_llm, tmp_path):
     """Full mesh run: all 3 output files produced, mesh metrics recorded."""
     cfg = RunConfig(
-        run_id_prefix="mesh_integration",
+        scenario="mesh_integration",
+        sweep_stamp="itest",
         n_runs=1,
         config_path=Path("config/mesh.yaml"),
         llm_model=os.environ.get("OPENAI_MODEL", "Qwen/Qwen3-32B-Instruct"),

@@ -51,6 +51,11 @@ async def crew_node(state: MeshState, crew: "Crew") -> dict:
             else len(crew.tasks)
         )
 
+        # Token usage from CrewAI's LiteLLM aggregation
+        token_usage = getattr(result, "token_usage", None)
+        prompt_tokens = getattr(token_usage, "prompt_tokens", 0) if token_usage else 0
+        completion_tokens = getattr(token_usage, "completion_tokens", 0) if token_usage else 0
+
         return {
             "triage_result": "outputs/triage.csv",
             "brief_result": "outputs/brief.md",
@@ -58,6 +63,8 @@ async def crew_node(state: MeshState, crew: "Crew") -> dict:
             "message_count": msg_count,
             "state_size_bytes": state_size,
             "step_trace": state["step_trace"] + ["crew_node"],
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
         }
     except AIPInternError:
         raise

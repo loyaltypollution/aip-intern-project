@@ -26,3 +26,7 @@ class MeshState(TypedDict):
     # Mesh-specific observability (Phase 2 measurements)
     message_count: int      # inter-agent messages within CrewAI crew
     state_size_bytes: int   # serialised LangGraph state size at crew_node return
+
+    # Token tracking (populated by crew_node from CrewAI result.token_usage)
+    prompt_tokens: int
+    completion_tokens: int

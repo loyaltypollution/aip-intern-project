@@ -34,8 +34,19 @@ def _build_crew(llm_cfg, workspace_root: Path) -> Crew:
     set_workspace_root(workspace_root)
     tools = get_tools()
 
+    # CrewAI's LLM() parses provider from the first `/` segment. vLLM's
+    # OpenAI-compatible endpoint is registered under `hosted_vllm` — `openai/`
+    # breaks when the model itself contains a `/` (e.g. `Qwen/Qwen2.5-...`),
+    # because the second segment gets treated as the model ID and fails
+    # native-provider lookup.
+    model_name = llm_cfg.model
+    if not model_name.startswith("hosted_vllm/"):
+        # Strip any other provider prefix first (e.g. a stale `openai/`).
+        if model_name.startswith("openai/"):
+            model_name = model_name[len("openai/"):]
+        model_name = f"hosted_vllm/{model_name}"
     crewai_llm = LLM(
-        model=llm_cfg.model,
+        model=model_name,
         base_url=llm_cfg.base_url,
         api_key=llm_cfg.api_key,
         temperature=llm_cfg.temperature,

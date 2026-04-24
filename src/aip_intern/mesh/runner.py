@@ -11,6 +11,7 @@ Usage from notebooks:
 from __future__ import annotations
 
 import dataclasses
+import shutil
 import time
 import uuid
 
@@ -24,8 +25,10 @@ from aip_intern.mesh.state import MeshState
 
 async def run_once(cfg: RunConfig) -> RunResult:
     """Execute a single mesh run."""
-    run_id = f"{cfg.run_id_prefix}_{uuid.uuid4().hex[:8]}"
-    artifacts_run_dir = cfg.artifacts_dir / run_id
+    run_id = f"{cfg.scenario}_{cfg.sweep_stamp}_{uuid.uuid4().hex[:8]}"
+    artifacts_run_dir = (
+        cfg.artifacts_dir / "sweeps" / cfg.sweep_stamp / cfg.scenario / run_id
+    )
     outputs_dir = artifacts_run_dir / "outputs"
     outputs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -39,7 +42,9 @@ async def run_once(cfg: RunConfig) -> RunResult:
         request_timeout=cfg.llm_request_timeout,
     )
 
-    metrics = RunMetrics(run_id=run_id)
+    metrics = RunMetrics(
+        run_id=run_id, scenario=cfg.scenario, sweep_stamp=cfg.sweep_stamp
+    )
     lf = get_langfuse()
     cb = get_callback(lf)
     invoke_config = {"callbacks": [cb]} if cb else {}
@@ -54,6 +59,8 @@ async def run_once(cfg: RunConfig) -> RunResult:
         "step_trace": [],
         "message_count": 0,
         "state_size_bytes": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
     }
 
     graph = build_graph(llm_cfg, workspace_root=cfg.workspace_root)
@@ -65,6 +72,8 @@ async def run_once(cfg: RunConfig) -> RunResult:
         metrics.step_trace = result_state.get("step_trace", [])
         metrics.message_count = result_state.get("message_count", 0)
         metrics.state_size_bytes = result_state.get("state_size_bytes", 0)
+        metrics.total_prompt_tokens = result_state.get("prompt_tokens", 0)
+        metrics.total_completion_tokens = result_state.get("completion_tokens", 0)
         success = result_state.get("error") is None
         error_msg = result_state.get("error")
     except AIPInternError as e:
@@ -79,6 +88,13 @@ async def run_once(cfg: RunConfig) -> RunResult:
         metrics.error = error_msg
 
     metrics.write(artifacts_run_dir / "metrics.json")
+
+    # Copy workspace outputs to artifact outputs dir (tools write to workspace/outputs/)
+    workspace_outputs = cfg.workspace_root / "outputs"
+    if workspace_outputs.exists():
+        for f in workspace_outputs.iterdir():
+            if f.is_file():
+                shutil.copy2(f, outputs_dir / f.name)
 
     return RunResult(
         run_id=run_id,
