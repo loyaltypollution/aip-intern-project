@@ -27,10 +27,13 @@ dev = [
     "pytest-asyncio>=0.24",
     "ruff>=0.4",
     "nbstripout>=0.7",
+    "jupytext>=1.16",
+    "nbconvert>=7.0",
 ]
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["src", "."]
+include = ["aip_intern*", "analysis*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -39,3 +42,9 @@ testpaths = ["tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
+
+# Jupytext pairs each .ipynb with a sibling .py (percent format).
+# Run `jupytext --sync notebooks/**/*.ipynb` to keep them aligned;
+# a pre-commit hook (see README) does this automatically.
+[tool.jupytext]
+formats = "ipynb,py:percent"
